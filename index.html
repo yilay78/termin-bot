@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Berlin Termin Bot</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#3b82f6">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Termin Bot">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c0f;
+    --panel:    #111318;
+    --border:   #1e2330;
+    --border2:  #2a3045;
+    --text:     #c8d0e0;
+    --muted:    #4a5570;
+    --accent:   #3b82f6;
+    --accent2:  #1d4ed8;
+    --green:    #22c55e;
+    --red:      #ef4444;
+    --yellow:   #f59e0b;
+    --mono:     'JetBrains Mono', monospace;
+    --head:     'Syne', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+    min-height: 100vh; overflow-x: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0;
+  }
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,12,15,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem; height: 60px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo {
+    font-family: var(--head); font-size: 18px; font-weight: 800;
+    letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .logo span { color: var(--muted); font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 12px; border-radius: 20px;
+    border: 1px solid var(--border2);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.5px; transition: all .3s;
+  }
+  .status-pill.running { border-color: var(--green); color: var(--green); }
+  .status-pill.stopped { border-color: var(--muted); color: var(--muted); }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.running .status-dot { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .layout {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--border);
+    min-height: calc(100vh - 60px);
+  }
+  .panel { background: var(--panel); padding: 1.5rem; }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.2rem; }
+  .panel-title { font-family: var(--head); font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border2);
+    background: transparent; color: var(--text);
+    font-family: var(--mono); font-size: 12px;
+    cursor: pointer; transition: all .2s; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  .btn-green { background: var(--green); border-color: var(--green); color: #000; }
+  .btn-green:hover { opacity: 0.85; color: #000; }
+  .btn-red { border-color: var(--red); color: var(--red); }
+  .btn-red:hover { background: var(--red); color: #fff; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .bot-control {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 1.5rem;
+    padding: 1.2rem 1.5rem; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .control-group { display: flex; gap: 8px; }
+  .info-block {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 6px;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .info-block b { color: var(--text); }
+
+  .personen-list { display: flex; flex-direction: column; gap: 8px; }
+  .person-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.02);
+    transition: border-color .2s; animation: slideIn .25s ease;
+  }
+  .person-card:hover { border-color: var(--border2); }
+  .person-card.erledigt { opacity: 0.5; }
+  .person-card.active { border-color: var(--accent); background: rgba(59,130,246,0.05); }
+  @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+
+  .person-nr {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--border2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600; flex-shrink: 0; color: var(--muted);
+  }
+  .person-card.active .person-nr { background: var(--accent); color: #fff; }
+  .person-card.erledigt .person-nr { background: var(--green); color: #000; }
+  .person-info { flex: 1; min-width: 0; }
+  .person-name { font-weight: 600; color: #e2e8f0; font-size: 13px; }
+  .person-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .person-termin { font-size: 11px; color: var(--green); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
+  .person-actions { display: flex; gap: 6px; opacity: 0; transition: opacity .2s; }
+  .person-card:hover .person-actions { opacity: 1; }
+
+  .form-panel {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.2rem; margin-bottom: 1rem;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .form-row.full { grid-template-columns: 1fr; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; letter-spacing: 0.5px; }
+  input, textarea, select {
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border2);
+    border-radius: 6px; color: var(--text); font-family: var(--mono);
+    font-size: 12px; padding: 8px 10px; outline: none; transition: border-color .2s;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+
+  .log-console {
+    background: #050709; border-radius: 8px; border: 1px solid var(--border);
+    height: 100%; min-height: 300px; display: flex; flex-direction: column;
+  }
+  .log-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .log-dots { display: flex; gap: 6px; }
+  .log-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .log-dot:nth-child(1){background:#ef4444} .log-dot:nth-child(2){background:#f59e0b} .log-dot:nth-child(3){background:#22c55e}
+  .log-body {
+    flex: 1; overflow-y: auto; padding: 12px;
+    font-size: 11.5px; line-height: 1.7;
+    scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+  }
+  .log-body::-webkit-scrollbar { width: 4px; }
+  .log-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  .log-line { padding: 1px 0; }
+  .log-line.success { color: var(--green); }
+  .log-line.warn    { color: var(--yellow); }
+  .log-line.error   { color: var(--red); }
+  .log-line.info    { color: #7dd3fc; }
+  .log-empty { color: var(--muted); text-align: center; padding: 3rem; }
+
+  .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 1.2rem; }
+  .tab {
+    padding: 8px 16px; font-size: 12px; font-weight: 600; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s;
+    background: none; border-top: none; border-left: none; border-right: none;
+    font-family: var(--mono); letter-spacing: 0.5px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 1rem; }
+  .stat-card {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; text-align: center;
+  }
+  .stat-val { font-family: var(--head); font-size: 28px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+  .stat-lbl { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  .stat-card:nth-child(1) .stat-val { color: var(--text); }
+  .stat-card:nth-child(2) .stat-val { color: var(--green); }
+  .stat-card:nth-child(3) .stat-val { color: var(--yellow); }
+
+  #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+  .toast { padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; animation: toastIn .3s ease; border: 1px solid; }
+  .toast.success { background: rgba(34,197,94,.15); border-color: var(--green); color: var(--green); }
+  .toast.error   { background: rgba(239,68,68,.15);  border-color: var(--red);   color: var(--red); }
+  @keyframes toastIn { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .form-row { grid-template-columns: 1fr; } }
+  .scroll-area { overflow-y: auto; max-height: calc(100vh - 220px); padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    TERMIN<span>BOT</span>
+  </div>
+  <div class="header-right">
+    <div class="status-pill stopped" id="status-pill">
+      <div class="status-dot"></div>
+      <span id="status-text">GESTOPPT</span>
+    </div>
+  </div>
+</header>
+
+<!-- PWA Install Banner -->
+<div id="install-banner" style="
+  display:none; align-items:center; justify-content:space-between;
+  padding:10px 20px; background:linear-gradient(90deg,#1d4ed8,#3b82f6);
+  font-size:12px; font-family:var(--mono); gap:12px; flex-wrap:wrap;
+">
+  <span>📱 <b>Als App installieren</b> — auf dem Startbildschirm hinzufügen für schnelleren Zugriff</span>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-sm" style="background:#fff;color:#1d4ed8;border-color:#fff" onclick="appInstallieren()">Installieren</button>
+    <button class="btn btn-sm" style="border-color:rgba(255,255,255,0.4);color:#fff" onclick="document.getElementById('install-banner').style.display='none'">✕</button>
+  </div>
+</div>
+
+<div class="bot-control">
+  <div class="control-group">
+    <button class="btn btn-green" id="btn-start" onclick="botStarten()">▶ Bot starten</button>
+    <button class="btn btn-red"   id="btn-stop"  onclick="botStoppen()" disabled>■ Stoppen</button>
+  </div>
+  <div class="info-block">Aktuell: <b id="current-person">—</b></div>
+  <div class="info-block">Letzter Termin: <b id="last-slot" style="color:var(--green)">—</b></div>
+</div>
+
+<div class="layout">
+
+  <!-- LINKS -->
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('personen',this)">Personen</button>
+      <button class="tab" onclick="switchTab('hinzufuegen',this)">+ Hinzufügen</button>
+      <button class="tab" onclick="switchTab('einstellungen',this)">⚙ Einstellungen</button>
+    </div>
+
+    <!-- Personen -->
+    <div class="tab-content active" id="tab-personen">
+      <div class="stats">
+        <div class="stat-card"><div class="stat-val" id="stat-gesamt">0</div><div class="stat-lbl">Gesamt</div></div>
+        <div class="stat-card"><div class="stat-val" id="stat-erledigt">0</div><div class="stat-lbl">Gebucht</div></div>
+        <div class="stat-card"><div class="stat-val" id="stat-offen">0</div><div class="stat-lbl">Ausstehend</div></div>
+      </div>
+      <div class="scroll-area">
+        <div class="personen-list" id="personen-list">
+          <div style="color:var(--muted);text-align:center;padding:2rem">Keine Personen vorhanden.<br>Über „Hinzufügen" eintragen.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hinzufügen -->
+    <div class="tab-content" id="tab-hinzufuegen">
+      <div class="form-panel">
+        <div class="form-row">
+          <div>
+            <label>VOR- UND NACHNAME</label>
+            <input type="text" id="f-name" placeholder="Max Mustermann">
+          </div>
+          <div>
+            <label>GEBURTSDATUM (TT.MM.JJJJ)</label>
+            <input type="text" id="f-geburt" placeholder="01.01.1990">
+          </div>
+        </div>
+        <div class="form-row full">
+          <label>NOTIZ (Fahrzeug, Kennzeichen – optional)</label>
+          <input type="text" id="f-notiz" placeholder="VW Golf – B-XY 1234">
+        </div>
+        <button class="btn btn-primary" onclick="personHinzufuegen()" style="width:100%;justify-content:center;margin-top:8px">
+          ＋ Zur Liste hinzufügen
+        </button>
+      </div>
+      <div style="color:var(--muted);font-size:11px;line-height:1.9;padding:0 4px">
+        <b style="color:var(--text)">So funktioniert es:</b><br>
+        1. Personen zur Liste hinzufügen<br>
+        2. Unter Einstellungen die Zulassungsstellen-URL eingeben<br>
+        3. „Bot starten" drücken<br>
+        4. Bot bucht automatisch den frühestmöglichen Termin<br>
+        5. Nach Buchung kommt eine E-Mail-Benachrichtigung
+      </div>
+    </div>
+
+    <!-- Einstellungen -->
+    <div class="tab-content" id="tab-einstellungen">
+      <div class="form-panel">
+        <div class="form-row full">
+          <label>TERMIN-URL (service.berlin.de)</label>
+          <input type="text" id="s-url" placeholder="https://service.berlin.de/terminvereinbarung/termin/time/XXXXXXX/">
+        </div>
+        <div class="form-row" style="margin-top:10px">
+          <div>
+            <label>PRÜFINTERVALL (Sekunden)</label>
+            <input type="number" id="s-interval" placeholder="60" min="30" max="300">
+          </div>
+          <div>
+            <label>WUNSCHDATUM (leer = frühestmöglich)</label>
+            <input type="text" id="s-datum" placeholder="28.03.2026">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>WUNSCHUHRZEIT (leer = frühestmöglich)</label>
+            <input type="text" id="s-uhrzeit" placeholder="10:30">
+          </div>
+        </div>
+
+        <hr style="border-color:var(--border);margin:14px 0">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">E-MAIL-BENACHRICHTIGUNG</div>
+        <div class="form-row full">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-email-aktiv" style="width:auto">
+            E-Mail-Benachrichtigungen aktivieren
+          </label>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>GMAIL-ADRESSE (Absender)</label>
+            <input type="email" id="s-email-von" placeholder="deine@gmail.com">
+          </div>
+          <div>
+            <label>APP-PASSWORT (16 Zeichen)</label>
+            <input type="password" id="s-email-pass" placeholder="xxxx xxxx xxxx xxxx">
+          </div>
+        </div>
+        <div class="form-row full">
+          <label>BENACHRICHTIGUNG SENDEN AN</label>
+          <input type="email" id="s-email-an" placeholder="deine@gmail.com">
+        </div>
+        <button class="btn btn-primary" onclick="einstellungenSpeichern()" style="width:100%;justify-content:center;margin-top:8px">
+          💾 Einstellungen speichern
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECHTS: Live-Protokoll -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Live-Protokoll</span>
+      <button class="btn btn-sm" onclick="protokollLeeren()">Leeren</button>
+    </div>
+    <div class="log-console" style="height:calc(100vh - 200px)">
+      <div class="log-toolbar">
+        <div class="log-dots"><div class="log-dot"></div><div class="log-dot"></div><div class="log-dot"></div></div>
+        <span style="color:var(--muted);font-size:11px">bot_output</span>
+      </div>
+      <div class="log-body" id="log-body">
+        <div class="log-empty">Bot nicht gestartet.<br>Personen hinzufügen → Einstellungen eingeben → Starten.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+let ws = null;
+let botLauft = false;
+let personen = [];
+let aktivId  = null;
+
+function verbinden() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'log')             logHinzufuegen(msg.text, msg.level);
+    else if (msg.type === 'status')     botStatusSetzen(msg.running);
+    else if (msg.type === 'current_person') {
+      document.getElementById('current-person').textContent = msg.isim;
+      aktivId = null;
+      const p = personen.find(p => p.isim === msg.isim);
+      if (p) aktivId = p.id;
+      personenAnzeigen();
+    }
+    else if (msg.type === 'slot_found') {
+      document.getElementById('last-slot').textContent = `${msg.tarih} ${msg.saat}`;
+    }
+    else if (msg.type === 'kisi_tamamlandi') {
+      const p = personen.find(p => p.id === msg.id);
+      if (p) { p.tamamlandi = true; p.randevu_tarihi = msg.tarih; p.randevu_saati = msg.saat; }
+      personenAnzeigen();
+      showToast(`✅ Termin gebucht: ${p?.isim || ''}`, 'success');
+    }
+    else if (msg.type === 'kisiler_updated') personenLaden();
+  };
+  ws.onclose = () => setTimeout(verbinden, 3000);
+  ws.onerror = () => ws.close();
+}
+
+const logBody = document.getElementById('log-body');
+let logLeer = true;
+
+function logHinzufuegen(text, level = 'info') {
+  if (logLeer) { logBody.innerHTML = ''; logLeer = false; }
+  const z = document.createElement('div');
+  z.className = `log-line ${level}`;
+  z.textContent = text;
+  logBody.appendChild(z);
+  logBody.scrollTop = logBody.scrollHeight;
+}
+
+function protokollLeeren() {
+  fetch('/api/log', { method: 'DELETE' });
+  logBody.innerHTML = '<div class="log-empty">Protokoll geleert.</div>';
+  logLeer = true;
+}
+
+async function protokollLaden() {
+  const res = await fetch('/api/log');
+  const data = await res.json();
+  if (data.lines.length > 0) {
+    logBody.innerHTML = ''; logLeer = false;
+    data.lines.forEach(l => logHinzufuegen(l.trim()));
+  }
+}
+
+async function personenLaden() {
+  personen = await (await fetch('/api/kisiler')).json();
+  personenAnzeigen();
+}
+
+function personenAnzeigen() {
+  const liste    = document.getElementById('personen-list');
+  const gesamt   = personen.length;
+  const erledigt = personen.filter(p => p.tamamlandi).length;
+  document.getElementById('stat-gesamt').textContent   = gesamt;
+  document.getElementById('stat-erledigt').textContent = erledigt;
+  document.getElementById('stat-offen').textContent    = gesamt - erledigt;
+
+  if (gesamt === 0) {
+    liste.innerHTML = '<div style="color:var(--muted);text-align:center;padding:2rem">Keine Personen vorhanden.<br>Über „Hinzufügen" eintragen.</div>';
+    return;
+  }
+  liste.innerHTML = personen.map((p, i) => {
+    const aktiv = aktivId === p.id || (!aktivId && !p.tamamlandi && i === personen.findIndex(x => !x.tamamlandi));
+    const cls   = p.tamamlandi ? 'erledigt' : (aktiv && botLauft ? 'active' : '');
+    const termin = p.tamamlandi && p.randevu_tarihi
+      ? `<div class="person-termin">✓ ${p.randevu_tarihi} ${p.randevu_saati}</div>` : '';
+    const notiz = p.not ? ` · ${p.not}` : '';
+    return `<div class="person-card ${cls}" id="p-${p.id}">
+      <div class="person-nr">${p.tamamlandi ? '✓' : (i+1)}</div>
+      <div class="person-info">
+        <div class="person-name">${p.isim}</div>
+        <div class="person-meta">${p.dogum_tarihi}${notiz}</div>
+        ${termin}
+      </div>
+      <div class="person-actions">
+        ${p.tamamlandi ? `<button class="btn btn-sm" onclick="personZuruecksetzen(${p.id})" title="Zurücksetzen">↺</button>` : ''}
+        <button class="btn btn-sm btn-red" onclick="personLoeschen(${p.id})" title="Löschen">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function personHinzufuegen() {
+  const name   = document.getElementById('f-name').value.trim();
+  const geburt = document.getElementById('f-geburt').value.trim();
+  const notiz  = document.getElementById('f-notiz').value.trim();
+  if (!name || !geburt) { showToast('Name und Geburtsdatum sind Pflichtfelder!', 'error'); return; }
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(geburt)) { showToast('Geburtsdatum-Format: TT.MM.JJJJ', 'error'); return; }
+  await fetch('/api/kisiler', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ isim: name, dogum_tarihi: geburt, not_: notiz }),
+  });
+  document.getElementById('f-name').value = document.getElementById('f-geburt').value = document.getElementById('f-notiz').value = '';
+  showToast(`${name} hinzugefügt`, 'success');
+  personenLaden();
+  switchTab('personen', document.querySelector('.tab'));
+}
+
+async function personLoeschen(id) {
+  if (!confirm('Diese Person wirklich löschen?')) return;
+  await fetch(`/api/kisiler/${id}`, { method: 'DELETE' });
+  personenLaden();
+}
+
+async function personZuruecksetzen(id) {
+  await fetch(`/api/kisiler/${id}/sifirla`, { method: 'PUT' });
+  personenLaden();
+  showToast('Person zurückgesetzt', 'success');
+}
+
+function botStatusSetzen(lauft) {
+  botLauft = lauft;
+  const pill = document.getElementById('status-pill');
+  pill.className = `status-pill ${lauft ? 'running' : 'stopped'}`;
+  document.getElementById('status-text').textContent = lauft ? 'LÄUFT' : 'GESTOPPT';
+  document.getElementById('btn-start').disabled = lauft;
+  document.getElementById('btn-stop').disabled  = !lauft;
+  personenAnzeigen();
+}
+
+async function botStarten() {
+  if (!personen.filter(p => !p.tamamlandi).length) { showToast('Keine ausstehenden Personen!', 'error'); return; }
+  logHinzufuegen('▶ Bot wird gestartet...');
+  const res = await fetch('/api/bot/baslat', { method: 'POST' });
+  const d   = await res.json();
+  if (!d.ok) showToast(d.msg, 'error');
+}
+
+async function botStoppen() {
+  logHinzufuegen('■ Bot wird gestoppt...');
+  await fetch('/api/bot/durdur', { method: 'POST' });
+}
+
+async function einstellungenLaden() {
+  const s = await (await fetch('/api/ayarlar')).json();
+  document.getElementById('s-url').value          = s.termin_url     || '';
+  document.getElementById('s-interval').value     = s.check_interval || 60;
+  document.getElementById('s-datum').value        = s.manuel_tarih   || '';
+  document.getElementById('s-uhrzeit').value      = s.manuel_saat    || '';
+  document.getElementById('s-email-aktiv').checked = s.email_enabled || false;
+  document.getElementById('s-email-von').value    = s.email_from     || '';
+  document.getElementById('s-email-pass').value   = s.email_pass     || '';
+  document.getElementById('s-email-an').value     = s.email_to       || '';
+}
+
+async function einstellungenSpeichern() {
+  await fetch('/api/ayarlar', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      termin_url    : document.getElementById('s-url').value,
+      check_interval: parseInt(document.getElementById('s-interval').value) || 60,
+      manuel_tarih  : document.getElementById('s-datum').value,
+      manuel_saat   : document.getElementById('s-uhrzeit').value,
+      email_enabled : document.getElementById('s-email-aktiv').checked,
+      email_from    : document.getElementById('s-email-von').value,
+      email_pass    : document.getElementById('s-email-pass').value,
+      email_to      : document.getElementById('s-email-an').value,
+    }),
+  });
+  showToast('Einstellungen gespeichert ✓', 'success');
+}
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+function showToast(msg, type = 'success') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+
+async function init() {
+  verbinden();
+  await personenLaden();
+  await einstellungenLaden();
+  await protokollLaden();
+  botStatusSetzen((await (await fetch('/api/bot/durum')).json()).running);
+  pwaInit();
+}
+
+// ── PWA ───────────────────────────────────────────────────
+let deferredPrompt = null;
+
+function pwaInit() {
+  // Service Worker kaydet
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(() => console.log('SW kayıtlı'))
+      .catch(e => console.log('SW hatası:', e));
+  }
+
+  // "Ana ekrana ekle" banner'ı yakala
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    // Banner göster
+    const banner = document.getElementById('install-banner');
+    if (banner) banner.style.display = 'flex';
+  });
+
+  // Kurulum tamamlandı
+  window.addEventListener('appinstalled', () => {
+    const banner = document.getElementById('install-banner');
+    if (banner) banner.style.display = 'none';
+    showToast('App erfolgreich installiert! ✅', 'success');
+  });
+}
+
+async function appInstallieren() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') showToast('Wird installiert...', 'success');
+  deferredPrompt = null;
+  document.getElementById('install-banner').style.display = 'none';
+}
+
+init();
+</script>
+</body>
+</html>
