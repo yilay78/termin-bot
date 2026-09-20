@@ -1,0 +1,10 @@
+# Windows toplu iş dosyaları her zaman CRLF satır sonuyla teslim edilir,
+# aksi halde çift tıklayınca pencere hata verip kapanır.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Kabuk betikleri her zaman LF
+*.sh text eol=lf
+
+# İkili dosyalar (satır sonu dönüşümü yapılmaz)
+*.png binary
