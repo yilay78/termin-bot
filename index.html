@@ -335,6 +335,12 @@
             Formular automatisch absenden (auto_submit) — sonst nur ausfüllen
           </label>
         </div>
+        <div class="form-row full" style="margin-top:2px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-fast-booking" style="width:auto">
+            Blitz-Buchung (fast_booking) — Formular sofort ausfüllen, sobald ein Termin frei ist
+          </label>
+        </div>
 
         <hr style="border-color:var(--border);margin:14px 0">
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">E-MAIL-BENACHRICHTIGUNG</div>
@@ -563,6 +569,7 @@ async function einstellungenLaden() {
   document.getElementById('s-datum').value         = s.manuel_tarih   || '';
   document.getElementById('s-uhrzeit').value       = s.manuel_saat    || '';
   document.getElementById('s-auto-submit').checked = s.auto_submit    || false;
+  document.getElementById('s-fast-booking').checked = (s.fast_booking !== false);
   document.getElementById('s-email-aktiv').checked = s.email_enabled  || false;
   document.getElementById('s-email-von').value     = s.email_from     || '';
   document.getElementById('s-email-pass').value    = s.email_pass     || '';
@@ -582,6 +589,7 @@ async function einstellungenSpeichern() {
       manuel_tarih      : document.getElementById('s-datum').value,
       manuel_saat       : document.getElementById('s-uhrzeit').value,
       auto_submit       : document.getElementById('s-auto-submit').checked,
+      fast_booking      : document.getElementById('s-fast-booking').checked,
       email_enabled     : document.getElementById('s-email-aktiv').checked,
       email_from        : document.getElementById('s-email-von').value,
       email_pass        : document.getElementById('s-email-pass').value,

@@ -26,6 +26,7 @@ import os
 import random
 import re
 import smtplib
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -68,6 +69,7 @@ DEFAULT_SETTINGS = {
     "manuel_tarih"       : "",
     "manuel_saat"        : "",
     "auto_submit"        : False,
+    "fast_booking"       : True,   # slot bulununca formu hızlıca (anında) doldur
     # E-posta
     "email_enabled"      : False,
     "email_from"         : "",
@@ -126,6 +128,7 @@ def save_settings(settings: dict):
     except (TypeError, ValueError):
         clean["check_interval"] = 60
     clean["auto_submit"]      = bool(clean.get("auto_submit"))
+    clean["fast_booking"]     = bool(clean.get("fast_booking"))
     clean["email_enabled"]    = bool(clean.get("email_enabled"))
     clean["telegram_enabled"] = bool(clean.get("telegram_enabled"))
     save_json(SETTINGS_FILE, clean)
@@ -625,11 +628,24 @@ async def _earliest_time(page, preferred: str = "") -> Optional[dict]:
 
 # ── Form doldurma ────────────────────────────────────────────
 
-async def complete_booking(page, kisi: dict, slot: dict, settings: dict) -> bool:
-    await page.goto(slot["url"], wait_until="domcontentloaded")
-    await human_delay(1.5, 3.0)
+async def _fill_field(page, selector, value, fast) -> bool:
+    """Hızlı modda anında (.fill), normal modda insanımsı yazar."""
+    if fast:
+        await page.fill(selector, value, timeout=4000)
+    else:
+        await human_type(page, selector, value)
+    return True
 
-    # Saat sayfası da onay kutusu isteyebilir
+
+async def complete_booking(page, kisi: dict, slot: dict, settings: dict) -> bool:
+    fast = bool(settings.get("fast_booking", True))
+    t0   = time.monotonic()
+
+    await page.goto(slot["url"], wait_until="domcontentloaded")
+    # Hızlı modda sadece sayfanın oturması için kısa bekleme
+    await (asyncio.sleep(0.5) if fast else human_delay(1.5, 3.0))
+
+    # Saat/onay sayfası da onay kutusu isteyebilir
     await handle_restriction_page(page)
 
     parts   = kisi["isim"].split()
@@ -643,15 +659,18 @@ async def complete_booking(page, kisi: dict, slot: dict, settings: dict) -> bool
         (["#birthday", "#geburtsdatum", "input[name*='birth' i]", "input[name*='geburt' i]"], kisi.get("dogum_tarihi", "")),
         (["#email", "input[type='email']", "input[name*='mail' i]"],                        email),
     ]:
+        if not value:
+            continue
         for sel in selectors:
             try:
                 if await page.locator(sel).count():
-                    await human_type(page, sel, value)
+                    await _fill_field(page, sel, value, fast)
                     await log_and_broadcast(f"   ✎ {sel.split('[')[0].replace('#','')} → {value}")
                     break
             except Exception:
                 continue
-        await human_delay(0.3, 0.8)
+        if not fast:
+            await human_delay(0.3, 0.8)
 
     # Zorunlu onay kutuları (Datenschutz/AGB)
     for pattern in (r"Datenschutz", r"AGB", r"gelesen", r"einverstanden", r"akzeptier"):
@@ -685,7 +704,9 @@ async def complete_booking(page, kisi: dict, slot: dict, settings: dict) -> bool
         return False
 
     if not settings.get("auto_submit"):
-        await log_and_broadcast("ℹ️ auto_submit kapalı — form dolduruldu, gönderim manuel.", "warn")
+        await log_and_broadcast(
+            f"ℹ️ auto_submit kapalı — form {time.monotonic()-t0:.1f} sn'de dolduruldu, "
+            "gönderimi elle yap.", "warn")
         return False
 
     # Submit
@@ -694,10 +715,14 @@ async def complete_booking(page, kisi: dict, slot: dict, settings: dict) -> bool
                 "input[type='submit']"):
         try:
             if await page.locator(sel).count():
-                await human_delay(0.5, 1.2)
-                await human_click(page, sel)
-                await asyncio.sleep(3)
-                await log_and_broadcast("   → Submit gönderildi")
+                if fast:
+                    await page.click(sel, timeout=4000)
+                else:
+                    await human_delay(0.5, 1.2)
+                    await human_click(page, sel)
+                await asyncio.sleep(2)
+                await log_and_broadcast(
+                    f"   → Submit gönderildi ({time.monotonic()-t0:.1f} sn'de tamamlandı)")
                 return True
         except Exception:
             continue
@@ -775,134 +800,190 @@ async def notify(settings: dict, text: str, kisi: dict = None,
 
 # ── Ana Bot Görevi ───────────────────────────────────────────
 
+def _is_fatal_browser_error(page, e) -> bool:
+    """Hata tarayıcı/sekme çökmesi mi (yeniden başlatma gerektirir) yoksa
+    geçici bir sayfa hatası mı (yerinde tekrar denenir)?"""
+    try:
+        if page.is_closed():
+            return True
+    except Exception:
+        return True
+    msg = str(e).lower()
+    return any(t in msg for t in (
+        "target closed", "has been closed", "context was closed",
+        "page crashed", "crashed", "connection closed", "browser closed",
+        "target page, context or browser"))
+
+
+async def _run_search_loop(page):
+    """Bekleyen tüm kişileri sırayla işler. Normal bitişte/durdurulunca döner;
+    tarayıcı çökerse exception yükseltir (dış döngü yeniden başlatır)."""
+    aktif = [k for k in load_kisiler() if not k.get("tamamlandi")]
+    if not aktif:
+        await log_and_broadcast("Bekleyen kişi yok.", "warn")
+        return
+
+    for kisi in aktif:
+        if not bot_running:
+            return
+        # Bu kişi arada (başka tur/oturumda) tamamlanmış olabilir
+        fresh = {k["id"]: k for k in load_kisiler()}
+        if fresh.get(kisi["id"], {}).get("tamamlandi"):
+            continue
+
+        await log_and_broadcast(f"▶ Sıradaki: {kisi['isim']} ({kisi.get('dogum_tarihi','')})")
+        await broadcast({"type": "current_person", "isim": kisi["isim"]})
+        attempt = 0
+
+        while bot_running:
+            attempt += 1
+            # Ayarları her turda tazele — UI'daki değişiklik (URL, aralık,
+            # auto_submit…) yeniden başlatmadan etkili olur.
+            settings = load_settings()
+            await log_and_broadcast(f"[#{attempt}] Kontrol ediliyor...")
+
+            try:
+                if not await _open_and_prepare(page, settings["termin_url"]):
+                    await _sleep_interval(settings, extra="koruma")
+                    continue
+
+                # Onay kutusu (Ich bin kein Bot) çıkarsa geç
+                await accept_bot_checkbox(page, timeout=8)
+
+                slot = await find_earliest_slot(page, settings)
+
+                if not slot:
+                    cooldown = await get_cooldown_seconds(page)
+                    if cooldown is not None:
+                        await log_and_broadcast(
+                            f"❌ Müsait slot yok. Portal cooldown: {cooldown} sn.")
+                        await _sleep_interval(settings, cooldown=cooldown)
+                        # Cooldown bitti — yerinde 'wiederholen' dene, olmazsa
+                        # bir sonraki tur URL'yi yeniden açar.
+                        if await click_repeat_search(page):
+                            await log_and_broadcast("🔄 'Terminsuche wiederholen' tıklandı.")
+                    else:
+                        await log_and_broadcast("❌ Müsait slot yok.")
+                        await _sleep_interval(settings)
+                    continue
+
+                await log_and_broadcast(
+                    f"✅ Slot bulundu: {slot['tarih']} {slot['saat']}", "success")
+                await broadcast({"type": "slot_found",
+                                 "tarih": slot["tarih"], "saat": slot["saat"]})
+                await notify(
+                    settings,
+                    f"🚨 Berlin randevusu bulundu! {kisi['isim']} → "
+                    f"{slot['tarih']} {slot['saat']}",
+                )
+
+                ok = await complete_booking(page, kisi, slot, settings)
+                if ok:
+                    kisiler = load_kisiler()
+                    for k in kisiler:
+                        if k["id"] == kisi["id"]:
+                            k["tamamlandi"]     = True
+                            k["randevu_tarihi"] = slot["tarih"]
+                            k["randevu_saati"]  = slot["saat"]
+                    save_kisiler(kisiler)
+
+                    bekleyen = [k for k in kisiler if not k.get("tamamlandi")]
+                    await notify(
+                        settings,
+                        f"✅ Randevu alındı: {kisi['isim']} → "
+                        f"{slot['tarih']} {slot['saat']}",
+                        kisi=kisi, slot=slot, bekleyen=bekleyen,
+                    )
+                    await log_and_broadcast(
+                        f"🎉 RANDEVU ALINDI! {kisi['isim']} → "
+                        f"{slot['tarih']} {slot['saat']}", "success")
+                    await broadcast({"type": "kisi_tamamlandi", "id": kisi["id"],
+                                     "tarih": slot["tarih"], "saat": slot["saat"]})
+                    break
+                else:
+                    await log_and_broadcast(
+                        "Rezervasyon tamamlanamadı, tekrar denenecek.", "warn")
+                    await _sleep_interval(settings)
+
+            except Exception as e:
+                if _is_fatal_browser_error(page, e):
+                    raise   # dış döngü tarayıcıyı yeniden başlatsın
+                await log_and_broadcast(f"Hata: {type(e).__name__}: {e}", "error")
+                await _sleep_interval(settings)
+
+
 async def bot_main():
     global bot_running
     from playwright.async_api import async_playwright
 
-    settings = load_settings()
-    kisiler  = load_kisiler()
-    aktif    = [k for k in kisiler if not k.get("tamamlandi")]
-
-    if not aktif:
+    if not [k for k in load_kisiler() if not k.get("tamamlandi")]:
         await log_and_broadcast("Tüm kişiler zaten tamamlandı.", "warn")
         bot_running = False
         await broadcast({"type": "status", "running": False})
         return
 
-    # Masaüstünde HEADLESS=0 ile tarayıcı görünür açılır (CAPTCHA'yı elle
-    # çözebilmek için). Bulut/sunucuda varsayılan headless kalır.
+    settings = load_settings()
+    # Masaüstünde HEADLESS=0 ile tarayıcı görünür açılır (CAPTCHA için).
     headless = os.environ.get("HEADLESS", "1").strip().lower() not in ("0", "false", "no")
 
-    await log_and_broadcast(f"Bot başlatıldı — {len(aktif)} kişi bekliyor")
-    await log_and_broadcast(f"auto_submit = {settings.get('auto_submit')} · headless = {headless}")
+    await log_and_broadcast(
+        f"Bot başlatıldı — headless={headless} · auto_submit={settings.get('auto_submit')} "
+        f"· fast_booking={settings.get('fast_booking')}")
+    if settings.get("auto_submit") and not settings.get("email_to"):
+        await log_and_broadcast(
+            "⚠️ auto_submit açık ama alıcı E-posta boş — form e-posta isteyebilir. "
+            "Einstellungen'de e-posta gir.", "warn")
     await broadcast({"type": "status", "running": True})
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=headless,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-first-run",
-                "--window-size=1280,800",
-            ],
-            ignore_default_args=["--enable-automation"],
-        )
-        ctx = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            locale="de-DE",
-            timezone_id="Europe/Berlin",
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "de-DE,de;q=0.9"},
-        )
-        await ctx.add_init_script(STEALTH_JS)
-        page = await ctx.new_page()
+    launch_args = [
+        "--no-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--window-size=1280,800",
+    ]
 
-        try:
-            for kisi in aktif:
+    async with async_playwright() as pw:
+        crash = 0
+        # Dış döngü: tarayıcı çökerse yeniden başlatır (7/24 dayanıklılık).
+        while bot_running:
+            browser = None
+            try:
+                browser = await pw.chromium.launch(
+                    headless=headless, args=launch_args,
+                    ignore_default_args=["--enable-automation"],
+                )
+                ctx = await browser.new_context(
+                    user_agent=random.choice(USER_AGENTS),
+                    locale="de-DE",
+                    timezone_id="Europe/Berlin",
+                    viewport={"width": 1280, "height": 800},
+                    extra_http_headers={"Accept-Language": "de-DE,de;q=0.9"},
+                )
+                await ctx.add_init_script(STEALTH_JS)
+                page = await ctx.new_page()
+                crash = 0
+                await _run_search_loop(page)
+                break   # normal bitiş: tümü tamam ya da durduruldu
+            except Exception as e:
                 if not bot_running:
                     break
-
-                await log_and_broadcast(f"▶ Sıradaki: {kisi['isim']} ({kisi.get('dogum_tarihi','')})")
-                await broadcast({"type": "current_person", "isim": kisi["isim"]})
-                attempt = 0
-
-                while bot_running:
-                    attempt += 1
-                    await log_and_broadcast(f"[#{attempt}] Kontrol ediliyor...")
-
+                crash += 1
+                await log_and_broadcast(
+                    f"[TARAYICI HATASI] {type(e).__name__}: {e} — yeniden "
+                    f"başlatılıyor ({crash}).", "error")
+                backoff = min(60, 5 * crash)
+                for _ in range(backoff * 4):
+                    if not bot_running:
+                        break
+                    await asyncio.sleep(0.25)
+            finally:
+                if browser:
                     try:
-                        if not await _open_and_prepare(page, settings["termin_url"]):
-                            await _sleep_interval(settings, extra="koruma")
-                            continue
-
-                        # Onay kutusu (Ich bin kein Bot) çıkarsa geç
-                        await accept_bot_checkbox(page, timeout=8)
-
-                        slot = await find_earliest_slot(page, settings)
-
-                        if not slot:
-                            cooldown = await get_cooldown_seconds(page)
-                            if cooldown:
-                                await log_and_broadcast(
-                                    f"❌ Müsait slot yok. Portal cooldown: {cooldown} sn.")
-                                # 'wiederholen' butonu varsa cooldown sonrası bas
-                                await _sleep_interval(settings, cooldown=cooldown)
-                                if await click_repeat_search(page):
-                                    await log_and_broadcast("🔄 'Terminsuche wiederholen' tıklandı.")
-                            else:
-                                await log_and_broadcast("❌ Müsait slot yok.")
-                                await _sleep_interval(settings)
-                            continue
-
-                        await log_and_broadcast(
-                            f"✅ Slot bulundu: {slot['tarih']} {slot['saat']}", "success")
-                        await broadcast({"type": "slot_found",
-                                         "tarih": slot["tarih"], "saat": slot["saat"]})
-                        await notify(
-                            settings,
-                            f"🚨 Berlin randevusu bulundu! {kisi['isim']} → "
-                            f"{slot['tarih']} {slot['saat']}",
-                        )
-
-                        ok = await complete_booking(page, kisi, slot, settings)
-                        if ok:
-                            kisiler = load_kisiler()
-                            for k in kisiler:
-                                if k["id"] == kisi["id"]:
-                                    k["tamamlandi"]     = True
-                                    k["randevu_tarihi"] = slot["tarih"]
-                                    k["randevu_saati"]  = slot["saat"]
-                            save_kisiler(kisiler)
-
-                            bekleyen = [k for k in kisiler if not k.get("tamamlandi")]
-                            await notify(
-                                settings,
-                                f"✅ Randevu alındı: {kisi['isim']} → "
-                                f"{slot['tarih']} {slot['saat']}",
-                                kisi=kisi, slot=slot, bekleyen=bekleyen,
-                            )
-                            await log_and_broadcast(
-                                f"🎉 RANDEVU ALINDI! {kisi['isim']} → "
-                                f"{slot['tarih']} {slot['saat']}", "success")
-                            await broadcast({"type": "kisi_tamamlandi", "id": kisi["id"],
-                                             "tarih": slot["tarih"], "saat": slot["saat"]})
-                            break
-                        else:
-                            await log_and_broadcast(
-                                "Rezervasyon tamamlanamadı, tekrar denenecek.", "warn")
-                            await _sleep_interval(settings)
-
-                    except Exception as e:
-                        await log_and_broadcast(f"Hata: {type(e).__name__}: {e}", "error")
-                        await _sleep_interval(settings)
-        finally:
-            try:
-                await browser.close()
-            except Exception:
-                pass
+                        await browser.close()
+                    except Exception:
+                        pass
 
     bot_running = False
     await broadcast({"type": "status", "running": False})
@@ -910,19 +991,25 @@ async def bot_main():
 
 
 async def _sleep_interval(settings: dict, cooldown: int = None, extra: str = ""):
-    """Tarama aralığı kadar (veya portal cooldown'ı kadar) bekler.
-    bot_running False olursa erken çıkar."""
-    interval = max(MIN_INTERVAL, int(settings.get("check_interval", 60)))
-    wait = interval
-    if cooldown:
-        # Portalın istediği süreye uy; küçük bir jitter ekle
-        wait = max(interval, cooldown + random.randint(3, 8))
+    """Bekleme süresi kadar bekler; bot_running False olursa anında çıkar.
+
+    Portal bir cooldown bildirdiyse (Terminsuche erneut ausführbar in MM:SS),
+    TAM o süreye uyulur — sadece 2 sn güvenlik tamponu eklenir, boşa fazladan
+    beklenmez. Böylece süre biter bitmez tekrar sorulur (item 5). Cooldown
+    yoksa güvenli taban (MIN_INTERVAL) ile hafif jitter kullanılır."""
+    if cooldown is not None:
+        wait = max(1, int(cooldown) + 2)          # portalın dediği an + 2 sn tampon
+    else:
+        wait = max(MIN_INTERVAL, int(settings.get("check_interval", 60)))
+        wait += random.randint(0, 3)
     label = f" ({extra})" if extra else ""
     await log_and_broadcast(f"   → {wait} sn sonra tekrar{label}...")
-    for _ in range(wait):
+    # 0.25 sn adımlarla bekle: durdurma emri ve süre bitişi anında yakalanır
+    steps = max(1, int(wait / 0.25))
+    for _ in range(steps):
         if not bot_running:
             return
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.25)
 
 
 # ── FastAPI ──────────────────────────────────────────────────
@@ -1026,16 +1113,48 @@ async def sifirla_kisi(kid: int):
 
 # -- Bot kontrolü --
 
+def _start_bot_task():
+    """Bot görevini başlatır ve beklenmedik bitişte durumu sıfırlar."""
+    global bot_task, bot_running
+    bot_running = True
+    bot_task = asyncio.create_task(bot_main())
+
+    def _done(t: asyncio.Task):
+        global bot_running
+        bot_running = False
+        try:
+            exc = t.exception()
+        except asyncio.CancelledError:
+            exc = None
+        if exc:
+            print(f"[bot_main beklenmedik bitiş] {exc!r}", flush=True)
+
+    bot_task.add_done_callback(_done)
+
+
 @app.post("/api/bot/baslat")
 async def baslat_bot():
-    global bot_task, bot_running
     if bot_running:
         return {"ok": False, "msg": "Bot zaten çalışıyor"}
     if not [k for k in load_kisiler() if not k.get("tamamlandi")]:
         return {"ok": False, "msg": "Bekleyen kişi yok"}
-    bot_running = True
-    bot_task = asyncio.create_task(bot_main())
+    _start_bot_task()
     return {"ok": True}
+
+
+@app.on_event("startup")
+async def _maybe_autostart():
+    """AUTOSTART=1 ise (7/24 sunucu/Railway) bot, sunucu açılışında
+    otomatik başlar — kimsenin 'Başlat'a basmasına gerek kalmaz."""
+    if os.environ.get("AUTOSTART", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    if bot_running:
+        return
+    if not [k for k in load_kisiler() if not k.get("tamamlandi")]:
+        print("[AUTOSTART] Bekleyen kişi yok — bot başlatılmadı.", flush=True)
+        return
+    print("[AUTOSTART] Bot otomatik başlatılıyor…", flush=True)
+    _start_bot_task()
 
 
 @app.post("/api/bot/durdur")

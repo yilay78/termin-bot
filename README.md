@@ -20,9 +20,13 @@ FastAPI backend + tek sayfalık PWA arayüz. Railway / Docker üzerinde 7/24
   - `Wunschtage- und Zeiträume auswählen` ara sayfasını geçer
     (`Buchbare Tage anzeigen`)
   - Portalın `Terminsuche erneut ausführbar in MM:SS` cooldown süresini
-    okuyup tam o kadar bekler, ardından `Terminsuche wiederholen`e basar
+    okuyup **tam o an** tekrar sorar (boşa bekleme yok, +2 sn güvenlik tamponu)
   - `Ich bin kein Bot` onay kutusunu çok yöntemli (check / label / JS / click)
     işaretler
+- ⚡ **Blitz-Buchung (`fast_booking`)** — slot bulununca formu char-by-char
+  değil **anında** doldurup gönderir; kritik saniyeleri kısaltır
+- 🔁 **7/24 dayanıklılık** — tarayıcı çökerse otomatik yeniden başlar;
+  `AUTOSTART=1` ile sunucu açılışında bot kendiliğinden çalışır
 - 👥 **Çok kişilik kuyruk** — birden fazla kişiyi sırayla işler, her biri için
   en erken günü/saati bulur
 - 🕐 **Wunschdatum / Wunschuhrzeit** — belirli gün veya saat tercih edilebilir
@@ -30,6 +34,7 @@ FastAPI backend + tek sayfalık PWA arayüz. Railway / Docker üzerinde 7/24
 - ✍️ **Otomatik form doldurma** + isteğe bağlı **otomatik gönderim**
   (`auto_submit`)
 - 🔔 **Bildirimler:** E-posta (Gmail) **ve/veya** Telegram
+- ⚙️ Ayarlar her turda tazelenir — UI'da değişiklik yeniden başlatma gerektirmez
 - 📊 Canlı log konsolu (WebSocket) + kişi istatistikleri
 - 📱 PWA — telefonda ana ekrana eklenebilir
 
@@ -75,6 +80,7 @@ Ayarlar arayüzden kaydedilir ve `ayarlar.json` dosyasında tutulur.
 | `manuel_tarih` | İstenen gün (`GG.AA.YYYY`), boş = en erken | `""` |
 | `manuel_saat` | İstenen saat (`SS:DD`), boş = en erken | `""` |
 | `auto_submit` | Formu otomatik gönder (kapalıysa sadece doldurur) | `false` |
+| `fast_booking` | Blitz-Buchung: slot bulununca formu anında doldur/gönder | `true` |
 | `email_enabled` | E-posta bildirimini aç | `false` |
 | `email_from` / `email_pass` / `email_to` | Gmail gönderici / **uygulama şifresi** / alıcı | `""` |
 | `telegram_enabled` | Telegram bildirimini aç | `false` |
@@ -83,26 +89,42 @@ Ayarlar arayüzden kaydedilir ve `ayarlar.json` dosyasında tutulur.
 > Sırlar (e-posta şifresi, Telegram token) API üzerinden `********` olarak
 > maskelenir; boş/maskeli kaydedersen mevcut değer korunur.
 
-Dosya konumları ortam değişkenleriyle değiştirilebilir:
-`DATA_FILE`, `SETTINGS_FILE`, `LOG_FILE`, `PORT`.
+### Ortam değişkenleri
+
+| Değişken | Açıklama | Varsayılan |
+|---|---|---|
+| `PORT` | Sunucu portu | `8000` |
+| `HEADLESS` | `0` = tarayıcı görünür (masaüstü, CAPTCHA için), `1` = arka plan | `1` |
+| `AUTOSTART` | `1` = sunucu açılışında bot otomatik başlar (7/24 için) | (kapalı) |
+| `DATA_FILE` / `SETTINGS_FILE` / `LOG_FILE` | Veri/ayar/log dosya yolları | proje klasörü |
 
 ---
 
-## Docker / Railway ile dağıtım
+## Docker / Railway ile 7/24 dağıtım
 
 Depoda hazır `Dockerfile` ve `railway.json` var:
 
 ```bash
 docker build -t termin-bot .
-docker run -p 8000:8000 termin-bot
+docker run -p 8000:8000 -e AUTOSTART=1 termin-bot
 ```
 
 Railway'de repoyu bağla → `DOCKERFILE` builder otomatik algılanır.
-`PORT` ortam değişkenini Railway sağlar.
+`PORT`'u Railway sağlar. **7/24 çalışsın** istiyorsan:
+
+1. Railway → **Variables** kısmına `AUTOSTART=1` ekle → bot, konteyner her
+   açıldığında kimse "Başlat"a basmadan çalışmaya başlar.
+2. Tarayıcı çökerse bot kendini **otomatik yeniden başlatır**; sağlayıcının
+   `restartPolicy`'si de tüm süreç çökerse konteyneri yeniden ayağa kaldırır.
+
+> **⚠️ Kalıcılık (önemli):** Railway dosya sistemi geçicidir — her yeni
+> dağıtımda `kisiler.json` / `ayarlar.json` **sıfırlanır**. 7/24 için ya bir
+> **kalıcı disk (Volume)** bağlayıp `DATA_FILE`/`SETTINGS_FILE` yollarını oraya
+> ver, ya da ilk açılıştan sonra kişileri/ayarları arayüzden bir kez daha gir.
 
 > Bulut ortamında tarayıcı **headless** çalışır; `Ich bin kein Bot` onayı
-> otomatik verilir, ancak gerçek bir CAPTCHA çıkarsa manuel çözüm gerekir
-> (log'da uyarı görünür).
+> otomatik verilir, ancak gerçek bir CAPTCHA çıkarsa çözülemez — bu durumda
+> `auto_submit` kapalı tutup Telegram bildirimiyle elle bitirmek daha güvenli.
 
 ---
 
