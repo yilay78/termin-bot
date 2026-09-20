@@ -325,6 +325,12 @@
             <input type="text" id="s-uhrzeit" placeholder="10:30">
           </div>
         </div>
+        <div class="form-row full" style="margin-top:4px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-auto-submit" style="width:auto">
+            Formular automatisch absenden (auto_submit) — sonst nur ausfüllen
+          </label>
+        </div>
 
         <hr style="border-color:var(--border);margin:14px 0">
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">E-MAIL-BENACHRICHTIGUNG</div>
@@ -348,6 +354,26 @@
           <label>BENACHRICHTIGUNG SENDEN AN</label>
           <input type="email" id="s-email-an" placeholder="deine@gmail.com">
         </div>
+
+        <hr style="border-color:var(--border);margin:14px 0">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">TELEGRAM-BENACHRICHTIGUNG</div>
+        <div class="form-row full">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-tg-aktiv" style="width:auto">
+            Telegram-Benachrichtigungen aktivieren
+          </label>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>BOT-TOKEN (via @BotFather)</label>
+            <input type="password" id="s-tg-token" placeholder="123456:ABC-DEF...">
+          </div>
+          <div>
+            <label>CHAT-ID</label>
+            <input type="text" id="s-tg-chat" placeholder="123456789">
+          </div>
+        </div>
+
         <button class="btn btn-primary" onclick="einstellungenSpeichern()" style="width:100%;justify-content:center;margin-top:8px">
           💾 Einstellungen speichern
         </button>
@@ -528,28 +554,37 @@ async function botStoppen() {
 
 async function einstellungenLaden() {
   const s = await (await fetch('/api/ayarlar')).json();
-  document.getElementById('s-url').value          = s.termin_url     || '';
-  document.getElementById('s-interval').value     = s.check_interval || 60;
-  document.getElementById('s-datum').value        = s.manuel_tarih   || '';
-  document.getElementById('s-uhrzeit').value      = s.manuel_saat    || '';
-  document.getElementById('s-email-aktiv').checked = s.email_enabled || false;
-  document.getElementById('s-email-von').value    = s.email_from     || '';
-  document.getElementById('s-email-pass').value   = s.email_pass     || '';
-  document.getElementById('s-email-an').value     = s.email_to       || '';
+  document.getElementById('s-url').value           = s.termin_url     || '';
+  document.getElementById('s-interval').value      = s.check_interval || 60;
+  document.getElementById('s-datum').value         = s.manuel_tarih   || '';
+  document.getElementById('s-uhrzeit').value       = s.manuel_saat    || '';
+  document.getElementById('s-auto-submit').checked = s.auto_submit    || false;
+  document.getElementById('s-email-aktiv').checked = s.email_enabled  || false;
+  document.getElementById('s-email-von').value     = s.email_from     || '';
+  document.getElementById('s-email-pass').value    = s.email_pass     || '';
+  document.getElementById('s-email-an').value      = s.email_to       || '';
+  document.getElementById('s-tg-aktiv').checked    = s.telegram_enabled   || false;
+  document.getElementById('s-tg-token').value      = s.telegram_bot_token || '';
+  document.getElementById('s-tg-chat').value       = s.telegram_chat_id   || '';
 }
 
 async function einstellungenSpeichern() {
+  const interval = Math.max(30, parseInt(document.getElementById('s-interval').value) || 60);
   await fetch('/api/ayarlar', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
-      termin_url    : document.getElementById('s-url').value,
-      check_interval: parseInt(document.getElementById('s-interval').value) || 60,
-      manuel_tarih  : document.getElementById('s-datum').value,
-      manuel_saat   : document.getElementById('s-uhrzeit').value,
-      email_enabled : document.getElementById('s-email-aktiv').checked,
-      email_from    : document.getElementById('s-email-von').value,
-      email_pass    : document.getElementById('s-email-pass').value,
-      email_to      : document.getElementById('s-email-an').value,
+      termin_url        : document.getElementById('s-url').value,
+      check_interval    : interval,
+      manuel_tarih      : document.getElementById('s-datum').value,
+      manuel_saat       : document.getElementById('s-uhrzeit').value,
+      auto_submit       : document.getElementById('s-auto-submit').checked,
+      email_enabled     : document.getElementById('s-email-aktiv').checked,
+      email_from        : document.getElementById('s-email-von').value,
+      email_pass        : document.getElementById('s-email-pass').value,
+      email_to          : document.getElementById('s-email-an').value,
+      telegram_enabled  : document.getElementById('s-tg-aktiv').checked,
+      telegram_bot_token: document.getElementById('s-tg-token').value,
+      telegram_chat_id  : document.getElementById('s-tg-chat').value,
     }),
   });
   showToast('Einstellungen gespeichert ✓', 'success');

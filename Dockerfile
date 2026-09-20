@@ -22,8 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 # Uygulama dosyaları
-COPY app.py .
-COPY index.html .
+COPY app.py index.html manifest.json sw.js icon-192.png icon-512.png ./
 
 # Port
 EXPOSE 8000

@@ -1,0 +1,24 @@
+# Çalışma zamanında oluşan veri dosyaları (asla commit'lenmez)
+kisiler.json
+ayarlar.json
+termin_bot.log
+*.log
+*.tmp
+
+# Tarayıcı profil klasörleri
+chrome-profil/
+chrome-profile/
+.playwright/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# İşletim sistemi / editör
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
