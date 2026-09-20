@@ -37,12 +37,23 @@ FastAPI backend + tek sayfalık PWA arayüz. Railway / Docker üzerinde 7/24
 
 ## Hızlı Başlangıç (yerel)
 
+**En kolay yol (Windows):** `BASLAT.bat` dosyasına çift tıkla. İlk çalıştırmada
+eksik paketleri ve Chromium'u otomatik kurar, sonra tarayıcıda arayüzü açar.
+Bu başlatıcı botu **görünür tarayıcıyla** (`HEADLESS=0`) çalıştırır; böylece bir
+CAPTCHA çıkarsa elle çözebilirsin.
+
+**Elle (her platform):**
+
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 python app.py
 # → http://localhost:8000
 ```
+
+> Tarayıcının görünür mü yoksa arka planda mı açılacağını `HEADLESS` ortam
+> değişkeni belirler: `HEADLESS=0` görünür (masaüstü için önerilir),
+> `HEADLESS=1` (varsayılan) arka plan / sunucu.
 
 Ardından tarayıcıda:
 

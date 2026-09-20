@@ -767,13 +767,17 @@ async def bot_main():
         await broadcast({"type": "status", "running": False})
         return
 
+    # Masaüstünde HEADLESS=0 ile tarayıcı görünür açılır (CAPTCHA'yı elle
+    # çözebilmek için). Bulut/sunucuda varsayılan headless kalır.
+    headless = os.environ.get("HEADLESS", "1").strip().lower() not in ("0", "false", "no")
+
     await log_and_broadcast(f"Bot başlatıldı — {len(aktif)} kişi bekliyor")
-    await log_and_broadcast(f"auto_submit = {settings.get('auto_submit')}")
+    await log_and_broadcast(f"auto_submit = {settings.get('auto_submit')} · headless = {headless}")
     await broadcast({"type": "status", "running": True})
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
-            headless=True,   # Bulut sunucusunda headless zorunlu
+            headless=headless,
             args=[
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
