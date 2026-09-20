@@ -306,8 +306,12 @@
     <div class="tab-content" id="tab-einstellungen">
       <div class="form-panel">
         <div class="form-row full">
-          <label>TERMIN-URL (service.berlin.de)</label>
-          <input type="text" id="s-url" placeholder="https://service.berlin.de/terminvereinbarung/termin/time/XXXXXXX/">
+          <label>TERMIN-URL (service.berlin.de — „tag.php" Kalender-URL!)</label>
+          <input type="text" id="s-url" placeholder="https://service.berlin.de/terminvereinbarung/termin/tag.php?termin=1&anliegen[]=...">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.5">
+            ⚠️ Mit <b>tag.php</b> beginnende Kalender-URL verwenden — nicht eine
+            <code>…/termin/time/&lt;id&gt;/</code>-URL (die läuft ab → Fehlerseite).
+          </div>
         </div>
         <div class="form-row" style="margin-top:10px">
           <div>

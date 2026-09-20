@@ -59,7 +59,11 @@ BASE_URL = "https://service.berlin.de"
 
 # ── Varsayılan ayarlar ──────────────────────────────────────
 DEFAULT_SETTINGS = {
-    "termin_url"         : "https://service.berlin.de/terminvereinbarung/termin/time/1323615/",
+    # Takvim (tag.php) URL'si kullanılmalı; oturuma bağlı .../termin/time/<id>/
+    # linkleri kısa sürede geçersiz olup portalı /termin/stop/ hatasına atar.
+    "termin_url"         : ("https://service.berlin.de/terminvereinbarung/termin/tag.php?"
+                            "termin=1&anliegen[]=324169&dienstleisterlist=121364,121362"
+                            "&herkunft=http%3A%2F%2Fservice.berlin.de%2Fdienstleistung%2F324169%2F"),
     "check_interval"     : 60,
     "manuel_tarih"       : "",
     "manuel_saat"        : "",
@@ -519,6 +523,18 @@ def extract_date(url: str) -> str:
     return "?"
 
 
+async def is_stop_page(page) -> bool:
+    """Portalın 'Es ist ein Fehler aufgetreten' / /termin/stop/ hata sayfası."""
+    try:
+        if "/termin/stop/" in page.url:
+            return True
+        body = (await page.inner_text("body"))[:600]
+        return ("Zu ihrer Suche konnten keine Daten" in body
+                or "Es ist ein Fehler aufgetreten" in body)
+    except Exception:
+        return False
+
+
 async def _open_and_prepare(page, url: str) -> bool:
     """URL'yi açar, koruma ve restriction sayfalarını geçer."""
     try:
@@ -531,6 +547,12 @@ async def _open_and_prepare(page, url: str) -> bool:
         await log_and_broadcast("Bot koruması aşılamadı.", "warn")
         return False
     await handle_restriction_page(page)
+    if await is_stop_page(page):
+        await log_and_broadcast(
+            "⛔ Portal 'Es ist ein Fehler aufgetreten' (/termin/stop/) döndü. "
+            "Termin-URL geçersiz/eski — Einstellungen'de 'tag.php' ile başlayan "
+            "takvim URL'sini kullanın (…/termin/time/<id>/ değil).", "error")
+        return False
     return True
 
 

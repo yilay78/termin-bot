@@ -70,7 +70,7 @@ Ayarlar arayüzden kaydedilir ve `ayarlar.json` dosyasında tutulur.
 
 | Anahtar | Açıklama | Varsayılan |
 |---|---|---|
-| `termin_url` | İzlenecek `service.berlin.de` randevu URL'si | Zulassung örneği |
+| `termin_url` | İzlenecek `service.berlin.de` **takvim** URL'si — `tag.php` ile başlamalı (oturuma bağlı `…/termin/time/<id>/` linkleri geçersiz olup `/termin/stop/` hatasına yol açar) | `tag.php` örneği |
 | `check_interval` | Tarama aralığı (sn, min **30**) | `60` |
 | `manuel_tarih` | İstenen gün (`GG.AA.YYYY`), boş = en erken | `""` |
 | `manuel_saat` | İstenen saat (`SS:DD`), boş = en erken | `""` |
