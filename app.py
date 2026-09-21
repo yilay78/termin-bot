@@ -62,9 +62,16 @@ BASE_URL = "https://service.berlin.de"
 DEFAULT_SETTINGS = {
     # Takvim (tag.php) URL'si kullanılmalı; oturuma bağlı .../termin/time/<id>/
     # linkleri kısa sürede geçersiz olup portalı /termin/stop/ hatasına atar.
+    # Varsayılan: Führungszeugnis (Dienstleistung 120926), Berlin geneli tüm
+    # Bürgeramt'lar. Başka hizmet için anliegen[] ve dienstleisterlist'i değiştir.
     "termin_url"         : ("https://service.berlin.de/terminvereinbarung/termin/tag.php?"
-                            "termin=1&anliegen[]=324169&dienstleisterlist=121364,121362"
-                            "&herkunft=http%3A%2F%2Fservice.berlin.de%2Fdienstleistung%2F324169%2F"),
+                            "termin=1&anliegen[]=120926&dienstleisterlist="
+                            "122217,122219,122227,122231,122238,122243,122254,122252,"
+                            "122260,122262,122271,122273,122277,351612,351065,122280,"
+                            "122282,122284,122291,122285,122296,150230,355948,122301,"
+                            "122297,122294,122312,122314,122304,122311,122309,122281,"
+                            "351358,122279,324414,122283,122276,122274"
+                            "&herkunft=http%3A%2F%2Fservice.berlin.de%2Fdienstleistung%2F120926%2F"),
     "check_interval"     : 60,
     "manuel_tarih"       : "",
     "manuel_saat"        : "",
