@@ -530,7 +530,25 @@ def extract_date(url: str) -> str:
     if m:
         d = m.group(1)
         return f"{d[6:8]}.{d[4:6]}.{d[0:4]}"
+    # Berlin gün sayfaları unix epoch kullanır: /termin/time/<epoch>/
+    m = re.search(r"/time/(\d{9,11})/", url)
+    if m:
+        try:
+            return datetime.fromtimestamp(int(m.group(1))).strftime("%d.%m.%Y")
+        except Exception:
+            pass
     return "?"
+
+
+# Saat sayfasındaki gezinme/başlık linkleri (gerçek randevu saati DEĞİL)
+_NAV_TEXTS = (
+    "zeitraum", "buchbare tage", "tage anzeigen", "zurück", "weiter",
+    "abbrechen", "wiederhol", "erneut", "startseite", "nächst", "vorherig",
+    "ändern", "mehr", "menü", "suche", "anzeigen", "auswähl", "impressum",
+    "datenschutz", "barrierefrei",
+)
+# Gerçek bir randevu saati: metninde "09:30" / "9.30" gibi bir zaman geçer
+_TIME_RE = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
 
 
 async def is_stop_page(page) -> bool:
@@ -608,7 +626,12 @@ async def find_earliest_slot(page, settings: dict) -> Optional[dict]:
     await page.goto(_abs_url(page, href), wait_until="domcontentloaded")
     await asyncio.sleep(2)
     await handle_restriction_page(page)
-    return await _earliest_time(page, manuel_saat)
+    slot = await _earliest_time(page, manuel_saat)
+    if slot is None:
+        await log_and_broadcast(
+            f"ℹ️ Gün ({text}) açıldı ama gerçek saat bulunamadı "
+            "(slotlar dolmuş olabilir) — aramaya devam.", "warn")
+    return slot
 
 
 async def _earliest_time(page, preferred: str = "") -> Optional[dict]:
@@ -617,20 +640,42 @@ async def _earliest_time(page, preferred: str = "") -> Optional[dict]:
     except Exception:
         pass
     tarih = extract_date(page.url)
-    links = await page.locator(
-        "td.buchbar a, td.frei a, .timeslot a, a[href*='/termin/time/']"
+    raw = await page.locator(
+        "td.buchbar a, td.frei a, .timeslot a, a[href*='/termin/time/'], "
+        "a[href*='appointment'], li a[href*='/termin/']"
     ).all()
-    if not links:
+
+    # Sadece GERÇEK saat linklerini al: metninde SS:DD olmalı ve 'Zeitraum
+    # ändern', 'Buchbare Tage' gibi gezinme linkleri elenmeli. Aksi halde
+    # yanlış pozitif ('? Zeitraum ändern') oluşuyordu.
+    slots = []
+    seen = set()
+    for link in raw:
+        try:
+            text = (await link.inner_text()).strip()
+            href = await link.get_attribute("href")
+        except Exception:
+            continue
+        if not href:
+            continue
+        low = text.lower()
+        if any(nav in low for nav in _NAV_TEXTS):
+            continue
+        if not _TIME_RE.search(text):
+            continue
+        url = _abs_url(page, href)
+        if url in seen:
+            continue
+        seen.add(url)
+        slots.append({"saat": text, "url": url})
+
+    if not slots:
         return None
     if preferred:
-        for link in links:
-            t = await link.inner_text()
-            if preferred in t:
-                href = await link.get_attribute("href")
-                return {"tarih": tarih, "saat": t.strip(), "url": _abs_url(page, href)}
-    href = await links[0].get_attribute("href")
-    saat = (await links[0].inner_text()).strip()
-    return {"tarih": tarih, "saat": saat, "url": _abs_url(page, href)}
+        for s in slots:
+            if preferred in s["saat"]:
+                return {"tarih": tarih, **s}
+    return {"tarih": tarih, **slots[0]}
 
 
 # ── Form doldurma ────────────────────────────────────────────
